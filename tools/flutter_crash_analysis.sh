@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-#./flutter_crash_analysis.sh path/to/Flutter.dSYM path/to/raw_crash arch(arm64|armv7)
+
+# ./flutter_crash_analysis.sh path/to/Flutter.dSYM path/to/raw_crash arch(arm64|armv7)
+# 例子： ./flutter_crash_analysis.sh Flutter.dSYM raw_crash arm64
 
 dSYM_path="$1/Contents/Resources/DWARF/Flutter"
 crash_file_path="$2"
