@@ -1,0 +1,220 @@
+#!/usr/bin/env python
+# coding=utf-8
+# Copyright 2019 yx02. All rights reserved.
+
+import argparse
+import os
+import stat
+import subprocess
+import sys
+import shutil
+import platform
+
+"""Tool for build flutter engine.
+
+Usage:
+  flutter_engine_this \
+  --local-engine-src-path /path/to/engine/src \
+  --artifacts \
+"""
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Build Flutter Engine Tool')
+    parser.add_argument('--local-engine-src-path', type=str, help="flutter local engine src")
+    parser.add_argument('--ios', default=True, action='store_true')
+    parser.add_argument('--no-ios', dest='ios', action='store_false')
+    parser.add_argument('--arm', default=True, action='store_true')
+    parser.add_argument('--no-arm', dest='arm', action='store_false')
+    parser.add_argument('--arm64', default=True, action='store_true')
+    parser.add_argument('--no-arm64', dest='arm64', action='store_false')
+    parser.add_argument('--x86', default=True, action='store_true')
+    parser.add_argument('--no-x86', dest='x86', action='store_false')
+    parser.add_argument('--x64', default=True, action='store_true')
+    parser.add_argument('--no-x64', dest='x64', action='store_false')
+    parser.add_argument('--debug', default=True, action='store_true')
+    parser.add_argument('--no-debug', dest='debug', action='store_false')
+    parser.add_argument('--release', default=True, action='store_true')
+    parser.add_argument('--no-release', dest='release', action='store_false')
+    parser.add_argument('--profile', default=True, action='store_true')
+    parser.add_argument('--no-profile', dest='profile', action='store_false')
+    parser.add_argument('--gn', default=False, action='store_true')
+    parser.add_argument('--no-gn', dest='gn', action='store_false')
+    parser.add_argument('--clean', default=False, action='store_true')
+    parser.add_argument('--no-clean', dest='clean', action='store_false')
+    parser.add_argument('--build', default=False, action='store_true')
+    parser.add_argument('--no-build', dest='build', action='store_false')
+    parser.add_argument('--artifacts', default=False, action='store_true')
+    parser.add_argument('--no-artifacts', dest='artifacts', action='store_false')
+    parser.add_argument('--symbols', default=False, action='store_true')
+    parser.add_argument('--no-symbols', dest='symbols', action='store_false')
+    return run(parser.parse_args())
+
+
+def run(args):
+    flutter_src = args.local_engine_src_path
+    if not flutter_src:
+        print 'You should provide --local-engine-src-path=/path/to/engine/src'
+        return 1
+    flutter_gn = os.path.join(flutter_src, "flutter", "tools", "gn")
+
+    if args.ios:
+        # debug
+        # [flutter_gn, '--runtime-mode', 'debug', '--ios-cpu', 'arm', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_debug_arm"), '-j', '8']
+        # [flutter_gn, '--runtime-mode', 'debug', '--ios-cpu', 'arm64', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_debug"), '-j', '8']
+        # [flutter_gn, '--runtime-mode', 'debug', '--simulator', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_debug_sim"), '-j', '8']
+        if args.debug:
+            copy_ios_artifacts_and_symbols(args, flutter_src, "ios_debug", "ios_debug_arm", "ios_debug_sim", "ios")
+        # profile
+        # [flutter_gn, '--runtime-mode', 'profile', '--ios-cpu', 'arm', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_profile_arm"), '-j', '8']
+        # [flutter_gn, '--runtime-mode', 'profile', '--ios-cpu', 'arm64', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_profile"), '-j', '8']
+        if args.profile:
+            copy_ios_artifacts_and_symbols(args, flutter_src, "ios_profile", "ios_profile_arm", "ios_debug_sim", "ios-profile")
+        # release
+        # [flutter_gn, '--runtime-mode', 'release', '--ios-cpu', 'arm', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_release_arm"), '-j', '8']
+        # [flutter_gn, '--runtime-mode', 'release', '--ios-cpu', 'arm64', '--ios']
+        # ['ninja', '-C', os.path.join(flutter_src, "out", "ios_release"), '-j', '8']
+        if args.release:
+            copy_ios_artifacts_and_symbols(args, flutter_src, "ios_release", "ios_release_arm", "ios_debug_sim", "ios-release")
+    return 0
+
+
+def copy_ios_artifacts_and_symbols(args, flutter_src, src_arm64_dir, src_arm_dir, src_sim_dir, dest_dir):
+    # flutter_create_ios_framework = os.path.join(flutter_src, "out", "tools", "create_ios_framework.py")
+    # flutter_create_macos_gen_snapshots = os.path.join(flutter_src, "out", "tools", "create_macos_gen_snapshots.py")
+
+    flutter_out = os.path.join(flutter_src, "out", "engine")
+    flutter_out_artifacts = os.path.join(flutter_out, "artifacts")
+    flutter_out_symbols = os.path.join(flutter_out, "symbols")
+
+    current_artifacts = os.path.join(flutter_out_artifacts, dest_dir)
+    current_symbols = os.path.join(flutter_out_symbols, dest_dir)
+
+    if args.artifacts:
+        shutil.rmtree(current_artifacts, ignore_errors=True)
+        os.makedirs(current_artifacts)
+
+        shutil.copyfile(os.path.join(flutter_src, "out", src_arm64_dir, "Flutter.podspec"), os.path.join(current_artifacts, "Flutter.podspec"))
+        shutil.copyfile(os.path.join(flutter_src, "out", src_arm64_dir, "LICENSE"), os.path.join(current_artifacts, "LICENSE"))
+
+        if src_sim_dir:
+            src_sim_dir = os.path.join(flutter_src, "out", src_sim_dir)
+
+        create_ios_framework(os.path.join(flutter_src, "out", src_arm64_dir),
+                             os.path.join(flutter_src, "out", src_arm_dir),
+                             src_sim_dir,
+                             current_artifacts)
+
+        create_gen_snapshots(os.path.join(flutter_src, "out", src_arm64_dir),
+                             os.path.join(flutter_src, "out", src_arm_dir),
+                             current_artifacts)
+
+        # dysm
+        shutil.rmtree(current_symbols, ignore_errors=True)
+        os.makedirs(current_symbols)
+        shutil.move(os.path.join(current_artifacts, "Flutter.dSYM"), os.path.join(current_symbols, "Flutter.dSYM"))
+
+        if os.path.exists(os.path.join(current_artifacts, "Flutter.unstripped")):
+            shutil.move(os.path.join(current_artifacts, "Flutter.unstripped"), os.path.join(current_symbols, "Flutter.unstripped"))
+
+
+def create_ios_framework(src_arm64_dir, src_arm_dir, src_sim_dir, dest_dir):
+    fat_framework = os.path.join(dest_dir, 'Flutter.framework')
+
+    arm64_framework = os.path.join(src_arm64_dir, 'Flutter.framework')
+    armv7_framework = os.path.join(src_arm_dir, 'Flutter.framework')
+
+    arm64_dylib = os.path.join(arm64_framework, 'Flutter')
+    armv7_dylib = os.path.join(armv7_framework, 'Flutter')
+
+    if not os.path.isdir(arm64_framework):
+        print 'Cannot find iOS arm64 Framework at', arm64_framework
+        return 1
+    if not os.path.isdir(armv7_framework):
+        print 'Cannot find iOS armv7 Framework at', armv7_framework
+        return 1
+    if not os.path.isfile(arm64_dylib):
+        print 'Cannot find iOS arm64 dylib at', arm64_dylib
+        return 1
+    if not os.path.isfile(armv7_dylib):
+        print 'Cannot find iOS armv7 dylib at', armv7_dylib
+        return 1
+
+    shutil.rmtree(fat_framework, True)
+    shutil.copytree(arm64_framework, fat_framework)
+
+    linker_out = os.path.join(fat_framework, 'Flutter')
+
+    lipo_command = [
+      'lipo',
+      arm64_dylib,
+      armv7_dylib,
+    ]
+
+    if src_sim_dir:
+        simulator_framework = os.path.join(src_sim_dir, 'Flutter.framework')
+        simulator_dylib = os.path.join(simulator_framework, 'Flutter')
+
+        if not os.path.isdir(simulator_framework):
+            print 'Cannot find iOS simulator Framework at', simulator_framework
+            return 1
+        if not os.path.isfile(simulator_dylib):
+            print 'Cannot find iOS simulator dylib at', simulator_dylib
+            return 1
+
+        lipo_command.append(simulator_dylib)
+
+    lipo_command.append('-create')
+    lipo_command.append('-output')
+    lipo_command.append(linker_out)
+
+    # lipo
+    exec_command(lipo_command)
+
+    # strip_bitcode, 剥离bitcode支持，据说可以减少大小, 试了没什么差别
+    # exec_command(['xcrun', 'bitcode_strip', '-r', linker_out, '-o', linker_out])
+
+    # dSYM
+    dsym_out = os.path.splitext(fat_framework)[0] + '.dSYM'
+    exec_command(['dsymutil', '-o', dsym_out, linker_out])
+
+    if not src_sim_dir:
+        # copy unstripped
+        unstripped_out = os.path.join(dest_dir, 'Flutter.unstripped')
+        shutil.copyfile(linker_out, unstripped_out)
+        exec_command(["strip", "-x", "-S", linker_out])
+
+def create_gen_snapshots(src_arm64_dir, src_arm_dir, dest_dir):
+    arm64_gen_snapshot = os.path.join(src_arm64_dir, 'clang_x64', 'gen_snapshot')
+    armv7_gen_snapshot = os.path.join(src_arm_dir, 'clang_x64', 'gen_snapshot')
+
+    if not os.path.isfile(arm64_gen_snapshot):
+        print 'Cannot find x86_64 (arm64) gen_snapshot at', arm64_gen_snapshot
+        return 1
+    if not os.path.isfile(armv7_gen_snapshot):
+        print 'Cannot find i386 (armv7) gen_snapshot at', armv7_gen_snapshot
+        return 1
+
+    exec_command(['xcrun', 'bitcode_strip', '-r', armv7_gen_snapshot, '-o', os.path.join(dest_dir, 'gen_snapshot_armv7')])
+    exec_command(['xcrun', 'bitcode_strip', '-r', arm64_gen_snapshot, '-o', os.path.join(dest_dir, 'gen_snapshot_arm64')])
+
+
+def exec_command(args, cwd=None):
+    print("\n================ execute command in subprocess ===============")
+    print('command: %s' % str(args))
+    print('workdir: %s' % cwd)
+    print('execute command in subprocess: %s' % str(args))
+    p = subprocess.Popen(args=args, cwd=cwd)
+    if p.wait() != 0:
+        print("================ end ===============")
+        exit(1)
+    print("================ end ===============")
+
+if __name__ == '__main__':
+    sys.exit(main())
